@@ -1,5 +1,6 @@
 #include "io.cpp"
 #include "csr_graph.h"
+#include "metrics.cpp"
 #include <iostream>
 #include <vector>
 #include <unordered_map>
@@ -7,71 +8,6 @@
 #include <random>
 #include <chrono>
 #include <queue>
-
-double min_density(csr_graph& g, std::vector<int>& cluster_idx){
-    int n = g.t_vtx;
-    std::vector<int> cluster_degree(n, 0);
-    std::vector<int> cluster_coverage(n, 0);
-    for(int v = 0; v < n; v++){
-        int cv = cluster_idx[v];
-        int degree = g.row_map[v+1] - g.row_map[v];
-        cluster_degree[cv] += degree;
-        for(int j = g.row_map[v]; j < g.row_map[v+1]; j++){
-            int u = g.entries[j];
-            int cu = cluster_idx[u];
-            if(cv == cu){
-                cluster_coverage[cv]++;
-            }
-        }
-    }
-    double min = 1;
-    for(int c = 0; c < n; c++){
-        // assume that the density of any cluster with no edges is 1
-        if(cluster_degree[c] > 0){
-            double density = static_cast<double>(cluster_coverage[c]) / static_cast<double>(cluster_degree[c]);
-            if(density < min){
-                min = density;
-            }
-        }
-    }
-    return min;
-}
-
-double coverage(csr_graph& g, std::vector<int>& cluster_idx){
-    int n = g.t_vtx;
-    int coverage = 0;
-    for(int v = 0; v < n; v++){
-        int cv = cluster_idx[v];
-        for(int j = g.row_map[v]; j < g.row_map[v+1]; j++){
-            int u = g.entries[j];
-            int cu = cluster_idx[u];
-            if(cv == cu){
-                coverage++;
-            }
-        }
-    }
-    double inv_nnz = 1.0 / static_cast<double>(g.nnz);
-    return static_cast<double>(coverage) * inv_nnz;
-}
-
-double modularity(csr_graph& g, std::vector<int>& cluster_idx){
-    int n = g.t_vtx;
-    std::vector<int> cluster_degree(n, 0);
-    for(int v = 0; v < n; v++){
-        int cv = cluster_idx[v];
-        int degree = g.row_map[v+1] - g.row_map[v];
-        cluster_degree[cv] += degree;
-    }
-    double inv_nnz = 1.0 / static_cast<double>(g.nnz);
-    double mod = coverage(g, cluster_idx);
-    double penalty = 0;
-    for(int c = 0; c < n; c++){
-        double degree = cluster_degree[c];
-        penalty += degree*degree;
-    }
-    mod -= penalty*inv_nnz*inv_nnz;
-    return mod;
-}
 
 // most basic implementation of label propagation
 std::vector<int> label_propagation_v1(csr_graph& g){
@@ -327,9 +263,10 @@ int main(int argc, char** argv){
     if(g.error){
         return 1;
     }
-    std::vector<int> cluster_idx = label_propagation_v5(g);
+    std::vector<int> cluster_idx = label_propagation_v3(g);
     std::cout << "Modularity: " << modularity(g, cluster_idx) << std::endl;
     std::cout << "Coverage: " << coverage(g, cluster_idx) << std::endl;
     std::cout << "Minimum intra-cluster density: " << min_density(g, cluster_idx) << std::endl;
+    std::cout << "Average isolated cluster conductance: " << avg_isolated_conductance(g, cluster_idx) << std::endl;
     return 0;
 }
