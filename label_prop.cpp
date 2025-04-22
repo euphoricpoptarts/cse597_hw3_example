@@ -4,17 +4,15 @@
 #include <vector>
 #include <unordered_map>
 #include <numeric>
+#include <random>
 #include <chrono>
 #include <queue>
 
-double modularity(csr_graph& g, std::vector<int>& cluster_idx){
+double coverage(csr_graph& g, std::vector<int>& cluster_idx){
     int n = g.t_vtx;
-    std::vector<int> cluster_degree(n, 0);
     int coverage = 0;
     for(int v = 0; v < n; v++){
         int cv = cluster_idx[v];
-        int degree = g.row_map[v+1] - g.row_map[v];
-        cluster_degree[cv] += degree;
         for(int j = g.row_map[v]; j < g.row_map[v+1]; j++){
             int u = g.entries[j];
             int cu = cluster_idx[u];
@@ -23,9 +21,20 @@ double modularity(csr_graph& g, std::vector<int>& cluster_idx){
             }
         }
     }
-    std::cout << "Coverage: " << coverage << std::endl;
     double inv_nnz = 1.0 / static_cast<double>(g.nnz);
-    double mod = static_cast<double>(coverage) * inv_nnz;
+    return static_cast<double>(coverage) * inv_nnz;
+}
+
+double modularity(csr_graph& g, std::vector<int>& cluster_idx){
+    int n = g.t_vtx;
+    std::vector<int> cluster_degree(n, 0);
+    for(int v = 0; v < n; v++){
+        int cv = cluster_idx[v];
+        int degree = g.row_map[v+1] - g.row_map[v];
+        cluster_degree[cv] += degree;
+    }
+    double inv_nnz = 1.0 / static_cast<double>(g.nnz);
+    double mod = coverage(g, cluster_idx);
     double penalty = 0;
     for(int c = 0; c < n; c++){
         double degree = cluster_degree[c];
@@ -84,6 +93,7 @@ void label_propagation_v1(csr_graph& g){
     std::cout << modularity(g, cluster_idx) << std::endl;
 }
 
+// v1 + a more efficient datastructure
 void label_propagation_v2(csr_graph& g){
     int n = g.t_vtx;
     std::vector<int> cluster_idx(n);
@@ -136,6 +146,7 @@ void label_propagation_v2(csr_graph& g){
     std::cout << modularity(g, cluster_idx) << std::endl;
 }
 
+// v2 + vertex pruning
 void label_propagation_v3(csr_graph& g){
     int n = g.t_vtx;
     std::vector<int> cluster_idx(n);
@@ -199,7 +210,82 @@ void label_propagation_v3(csr_graph& g){
     }
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-    std::cout << "Iteration time: " << duration << std::endl;
+    std::cout << "Total time: " << duration << std::endl;
+    std::cout << modularity(g, cluster_idx) << std::endl;
+}
+
+// v3 + random vertex traversal order
+// what effect do you think the randomization will have on the runtime?
+// what about the modularity?
+void label_propagation_v4(csr_graph& g){
+    int n = g.t_vtx;
+    std::vector<int> cluster_idx(n);
+    std::vector<int> order(n);
+    // initializes cluster_idx and order as 0, 1, 2, 3, 4, ... (n - 2), (n - 1)
+    std::iota(cluster_idx.begin(), cluster_idx.end(), 0);
+    std::iota(order.begin(), order.end(), 0);
+    // more effective (though more memory intensive) datastructure
+    // contains an entry for every possible cluster id
+    std::vector<int> conn_strength(n, 0);
+    // conn keys holds a list of the current nonzero entries in conn_strength
+    std::vector<int> conn_keys(n, 0);
+    // tracks the last iteration in which an adjacent vertex was modified
+    std::vector<char> modified(n, -1);
+    // shuffle the vertex ordering randomly
+    std::shuffle(order.begin(), order.end(), std::mt19937{std::random_device{}()});
+    // iterate until convergance (no vertices change cluster in an iteration)
+    for(int lp_iteration = 0; ; lp_iteration++){
+        auto start = std::chrono::high_resolution_clock::now();
+        int t_modified = 0;
+        for(int i = 0; i < n; i++){
+            int v = order[i];
+            // if no adjacent vertex was modified in or after the last iteration
+            // do not process this vertex
+            if(modified[v] + 1 < lp_iteration) continue;
+            int adj_clusters = 0;
+            for(int j = g.row_map[v]; j < g.row_map[v+1]; j++){
+                int u = g.entries[j];
+                int cu = cluster_idx[u];
+                // update nonzero entries list
+                if(conn_strength[cu] == 0){
+                    conn_keys[adj_clusters++] = cu;
+                }
+                // increment strength
+                conn_strength[cu]++;
+            }
+            int max_val = 0;
+            int argmax = n + 1;
+            // iterate over nonzero entries
+            // find argmax as most connected adjacent cluster
+            for(int cx = 0; cx < adj_clusters; cx++){
+                int key = conn_keys[cx];
+                int val = conn_strength[key];
+                // reset to zero for next vertex
+                conn_strength[key] = 0;
+                // minimum label heuristic to break ties
+                if(val > max_val || (val == max_val && key < argmax)){
+                    argmax = key;
+                    max_val = val;
+                }
+            }
+            if(max_val > 0){
+                if(cluster_idx[v] != argmax){
+                    cluster_idx[v] = argmax;
+                    // mark all adjacent vertices with current iteration
+                    for(int j = g.row_map[v]; j < g.row_map[v+1]; j++){
+                        int u = g.entries[j];
+                        modified[u] = lp_iteration;
+                    }
+                    t_modified++;
+                }
+            }
+        }
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        std::cout << "Iteration time: " << duration << std::endl;
+        // no vertices were modified, then stop
+        if(t_modified == 0) break;
+    }
     std::cout << modularity(g, cluster_idx) << std::endl;
 }
 
