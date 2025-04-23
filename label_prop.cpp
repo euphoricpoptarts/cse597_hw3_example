@@ -255,15 +255,33 @@ std::vector<int> label_propagation_v4(csr_graph& g){
 }
 
 int main(int argc, char** argv){
-    if(argc != 2){
+    if(argc != 3){
         std::cerr << "Incorrect argument count" << std::endl;
-        std::cerr << "Usage: " << argv[0] << " <metis filename>" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <metis filename> <lp version>" << std::endl;
+        return 1;
     }
     csr_graph g = load_metis_graph(argv[1]);
     if(g.error){
         return 1;
     }
-    std::vector<int> cluster_idx = label_propagation_v3(g);
+    int version = atoi(argv[2]);
+    std::vector<int> cluster_idx;
+    switch(version){
+        case 1:
+            cluster_idx = label_propagation_v1(g);
+            break;
+        case 2:
+            cluster_idx = label_propagation_v2(g);
+            break;
+        case 3:
+            cluster_idx = label_propagation_v3(g);
+            break;
+        case 4:
+            cluster_idx = label_propagation_v4(g);
+            break;
+        default:
+            cluster_idx = label_propagation_v3(g);
+    }
     std::cout << "Modularity: " << modularity(g, cluster_idx) << std::endl;
     std::cout << "Coverage: " << coverage(g, cluster_idx) << std::endl;
     std::cout << "Minimum intra-cluster density: " << min_density(g, cluster_idx) << std::endl;
